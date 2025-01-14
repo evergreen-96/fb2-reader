@@ -4,27 +4,30 @@ import {
 	PluginSettingTab,
 	Setting,
 	TFile,
+	TFolder,
 	Notice,
 	Modal,
 	MarkdownView,
+	SuggestModal,
 } from "obsidian";
 
 /* ============================== */
-/* ======= Типы и Интерфейсы ===== */
+/* ======= Types and Interfaces ====== */
 /* ============================== */
 
-/**
- * Настройки плагина для конвертации FB2.
- */
 interface FB2ReaderPluginSettings {
 	imageFolderPath: string;
 	outputFolderPath: string;
+	quotesFolderPath: string;
+	fb2BaseFolderPath: string;       // Base folder for searching FB2 files (relative to the Vault root)
+	readingFontSize: string;         // e.g., "16px"
+	readingFontColor: string;        // e.g., "#333"
+	readingBackgroundColor: string;  // e.g., "#f5f5f5"
+	readingLineHeight: string;       // e.g., "1.5"
+	readingFontFamily: string;       // e.g., "sans-serif" or any custom value
+	readingTextAlign: string;        // e.g., "left"
 }
 
-/**
- * Интерфейс для хранения позиций чтения.
- * Ключ – путь к файлу, значение – положение прокрутки (в пикселях).
- */
 interface LastReadPositions {
 	[filePath: string]: number;
 }
@@ -32,11 +35,16 @@ interface LastReadPositions {
 const DEFAULT_SETTINGS: FB2ReaderPluginSettings = {
 	imageFolderPath: "fb2-images",
 	outputFolderPath: "",
+	quotesFolderPath: "quotes",
+	fb2BaseFolderPath: "",
+	readingFontSize: "16px",
+	readingFontColor: "#333",
+	readingBackgroundColor: "#f5f5f5",
+	readingLineHeight: "1.5",
+	readingFontFamily: "sans-serif",
+	readingTextAlign: "left",
 };
 
-/**
- * Данные о секции (главе) и её вложенных секциях.
- */
 interface SectionData {
 	title: string;
 	paragraphs: Element[];
@@ -45,44 +53,36 @@ interface SectionData {
 	children: SectionData[];
 }
 
-/**
- * Карта сносок: id → содержимое.
- */
 type FootnotesMap = Map<string, string>;
 
-/**
- * Метаданные книги.
- */
 interface BookMetaInfo {
 	title: string;
 	authors: string[];
 	coverHref: string;
 }
 
-/**
- * Интерфейс объединённых данных для сохранения во внешнем хранилище.
- */
 interface PluginData {
 	imageFolderPath: string;
 	outputFolderPath: string;
+	quotesFolderPath: string;
 	lastReadPositions: LastReadPositions;
 }
 
 /* ============================== */
-/* ======= Основной Плагин ====== */
+/* ======= Main Plugin Class ====== */
 /* ============================== */
 
 export default class FB2ReaderPlugin extends Plugin {
 	settings!: FB2ReaderPluginSettings;
-	// Карта сносок, заполняется при конвертации FB2.
 	private footnotes: FootnotesMap = new Map();
-	// Объект для хранения позиций чтения по файлам.
 	private lastReadPositions: LastReadPositions = {};
+	private isReadingMode: boolean = false;
+	public readingStyleEl!: HTMLStyleElement;
 
 	async onload() {
 		await this.loadSettings();
-    
-		// Регистрируем событие изменения активного листа.
+		this.setupReadingModeStyle();
+
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", (leaf) => {
 				try {
@@ -96,12 +96,32 @@ export default class FB2ReaderPlugin extends Plugin {
 		this.addCommand({
 			id: "choose-fb2-file",
 			name: "Convert FB2 to MD (choose file)",
+			callback: () => {
+				new FB2FileSuggestModal(this.app, this).open();
+			},
+		});
+
+		this.addCommand({
+			id: "save-selected-text-as-quote",
+			name: "Save Selected Text as Quote",
 			checkCallback: (checking: boolean) => {
-				if (!checking) {
-					new ChooseFB2FileModal(this.app, (file) => {
-						this.convertFB2(file);
-					}).open();
+				const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+				if (activeView && activeView.editor) {
+					if (checking) return true;
+					this.handleSaveQuote(activeView);
+				} else {
+					new Notice("Open a Markdown file with text to quote.");
 				}
+				return true;
+			},
+		});
+
+		this.addCommand({
+			id: "toggle-reading-mode",
+			name: "Toggle Reading Mode",
+			checkCallback: (checking: boolean) => {
+				if (checking) return true;
+				this.toggleReadingMode();
 				return true;
 			},
 		});
@@ -109,9 +129,42 @@ export default class FB2ReaderPlugin extends Plugin {
 		this.addSettingTab(new FB2ReaderSettingTab(this.app, this));
 	}
 
-	/**
-	 * Если открыта Markdown-заметка, пытаемся восстановить сохранённое положение прокрутки.
-	 */
+	private setupReadingModeStyle() {
+		const existing = document.getElementById("reading-mode-style");
+		if (existing) {
+			this.readingStyleEl = existing as HTMLStyleElement;
+			return;
+		}
+		this.readingStyleEl = document.createElement("style");
+		this.readingStyleEl.id = "reading-mode-style";
+		this.updateReadingModeStyle();
+		document.head.appendChild(this.readingStyleEl);
+	}
+
+	public updateReadingModeStyle() {
+		this.readingStyleEl.innerText = `
+			.markdown-preview-view.markdown-rendered.reading-mode {
+				background: ${this.settings.readingBackgroundColor} !important;
+				color: ${this.settings.readingFontColor} !important;
+				font-size: ${this.settings.readingFontSize} !important;
+				line-height: ${this.settings.readingLineHeight} !important;
+				font-family: ${this.settings.readingFontFamily} !important;
+				text-align: ${this.settings.readingTextAlign} !important;
+			}
+			.markdown-preview-view.markdown-rendered.reading-mode a {
+				color: #007acc !important;
+			}
+		`;
+	}
+
+	private toggleReadingMode() {
+		this.isReadingMode = !this.isReadingMode;
+		(document.querySelectorAll(".markdown-preview-view.markdown-rendered") as NodeListOf<HTMLElement>).forEach((el) => {
+			el.classList.toggle("reading-mode", this.isReadingMode);
+		});
+		new Notice(`Reading Mode ${this.isReadingMode ? "Activated" : "Deactivated"}`);
+	}
+
 	private handleActiveLeafChange(leaf: any) {
 		if (!leaf) return;
 		const view = leaf.view;
@@ -120,7 +173,6 @@ export default class FB2ReaderPlugin extends Plugin {
 			if (!file) return;
 			const savedScroll = this.lastReadPositions[file.path];
 			if (savedScroll !== undefined) {
-				// Немного задержки, чтобы контент точно загрузился.
 				window.setTimeout(() => {
 					try {
 						view.contentEl.scrollTop = savedScroll;
@@ -129,7 +181,6 @@ export default class FB2ReaderPlugin extends Plugin {
 					}
 				}, 100);
 			}
-			// Если обработчик скролла ещё не добавлен, добавляем его.
 			if (!view.contentEl.getAttribute("data-scroll-listener")) {
 				view.contentEl.setAttribute("data-scroll-listener", "true");
 				view.contentEl.addEventListener("scroll", () => {
@@ -144,15 +195,11 @@ export default class FB2ReaderPlugin extends Plugin {
 		}
 	}
 
-	/**
-	 * Основной метод конвертации FB2 → Markdown.
-	 */
 	async convertFB2(file: TFile) {
 		if (!file) {
 			new Notice("No file selected!");
 			return;
 		}
-
 		const xmlContent = await this.app.vault.read(file);
 		const parser = new DOMParser();
 		let doc: Document;
@@ -165,26 +212,16 @@ export default class FB2ReaderPlugin extends Plugin {
 			new Notice(`Error parsing FB2: ${error}`);
 			return;
 		}
-
-		// 1. Парсинг метаданных (название, авторы, обложка)
 		const meta = this.parseMetaInfo(doc);
-
-		// 2. Парсинг сносок
 		this.footnotes = this.parseFootnotes(doc);
-
-		// 3. Извлечение изображений из тегов <binary>
 		const imageMap = this.extractImages(doc);
-
-		// 4. Выбор основного тела книги (body без type="notes")
 		const mainBodies = Array.from(doc.querySelectorAll("body")).filter(
 			(body) => body.getAttribute("type") !== "notes"
 		);
-
 		if (mainBodies.length === 0) {
 			new Notice("No main <body> found in FB2.");
 			return;
 		}
-
 		const allRootSections: SectionData[] = [];
 		for (const bodyEl of mainBodies) {
 			const topSections = Array.from(bodyEl.querySelectorAll(":scope > section"));
@@ -192,43 +229,32 @@ export default class FB2ReaderPlugin extends Plugin {
 				allRootSections.push(this.parseSectionRecursive(sec, 1));
 			});
 		}
-
 		const flatSections: SectionData[] = [];
 		this.flattenSections(allRootSections, flatSections);
-
-		// 5. Формирование Markdown-документа
 		const mdLines: string[] = [];
 		this.addFrontMatter(mdLines, meta);
 		await this.addCover(mdLines, meta, imageMap, file.basename);
 		this.addTableOfContents(mdLines, flatSections);
 		await this.addSections(mdLines, flatSections, imageMap, file.basename);
-
-		// 6. Добавление сносок (если имеются)
 		if (this.footnotes.size > 0) {
-			mdLines.push("\n## Сноски\n");
+			mdLines.push("\n## Footnotes\n");
 			for (const [fnId, fnText] of this.footnotes.entries()) {
 				mdLines.push(`[^${fnId}]: ${fnText}`);
 			}
 		}
-
-		// 7. Сохранение Markdown-файла и его открытие
+		const formattedBaseName = this.getFormattedMDFileName(meta, file.basename);
+		const outputFilePath = await this.getAvailableMdPath(formattedBaseName);
 		const finalText = mdLines.join("\n\n");
-		const outputFilePath = await this.getAvailableMdPath(file.basename);
 		await this.app.vault.create(outputFilePath, finalText);
 		this.app.workspace.openLinkText(outputFilePath, "", false);
 		new Notice(`FB2 converted: ${outputFilePath}`);
 	}
-
-	/* ============================== */
-	/* ========= Парсинг =========== */
-	/* ============================== */
 
 	private parseMetaInfo(doc: Document): BookMetaInfo {
 		const titleInfo = doc.querySelector("description > title-info");
 		let bookTitle = "";
 		let authors: string[] = [];
 		let coverHref = "";
-
 		if (titleInfo) {
 			bookTitle = titleInfo.querySelector("book-title")?.textContent?.trim() ?? "";
 			authors = Array.from(titleInfo.querySelectorAll("author"))
@@ -238,10 +264,8 @@ export default class FB2ReaderPlugin extends Plugin {
 					return [first, last].filter(Boolean).join(" ");
 				})
 				.filter(Boolean);
-			coverHref =
-				titleInfo.querySelector("coverpage > image[l\\:href]")?.getAttribute("l:href")?.replace(/^#/, "").toLowerCase() ?? "";
+			coverHref = titleInfo.querySelector("coverpage > image[l\\:href]")?.getAttribute("l:href")?.replace(/^#/, "").toLowerCase() ?? "";
 		}
-
 		return { title: bookTitle, authors, coverHref };
 	}
 
@@ -249,7 +273,6 @@ export default class FB2ReaderPlugin extends Plugin {
 		const footnotesMap: FootnotesMap = new Map();
 		const notesBody = doc.querySelector('body[type="notes"]');
 		if (!notesBody) return footnotesMap;
-
 		const noteSections = Array.from(notesBody.querySelectorAll("section[id]"));
 		noteSections.forEach((ns) => {
 			const noteId = ns.getAttribute("id");
@@ -263,11 +286,9 @@ export default class FB2ReaderPlugin extends Plugin {
 	}
 
 	private parseSectionRecursive(sectionEl: Element, level: number): SectionData {
-		const title =
-			sectionEl.querySelector(":scope > title > p")?.textContent?.trim() ||
+		const title = sectionEl.querySelector(":scope > title > p")?.textContent?.trim() ||
 			sectionEl.querySelector(":scope > title")?.textContent?.trim() ||
 			"";
-
 		const epigraphs = Array.from(sectionEl.querySelectorAll(":scope > epigraph"));
 		const paragraphs = Array.from(sectionEl.querySelectorAll(":scope > p, :scope > image"));
 		const children = Array.from(sectionEl.querySelectorAll(":scope > section")).map((child) =>
@@ -292,10 +313,6 @@ export default class FB2ReaderPlugin extends Plugin {
 		return new Map(binaries.map((img) => [img.id, img]));
 	}
 
-	/* ============================== */
-	/* ======= Формирование MD ====== */
-	/* ============================== */
-
 	private addFrontMatter(mdLines: string[], meta: BookMetaInfo) {
 		mdLines.push("---");
 		if (meta.title) {
@@ -307,12 +324,7 @@ export default class FB2ReaderPlugin extends Plugin {
 		mdLines.push("---\n");
 	}
 
-	private async addCover(
-		mdLines: string[],
-		meta: BookMetaInfo,
-		imageMap: Map<string, { id: string; contentType: string; data: string }>,
-		bookName: string
-	) {
+	private async addCover(mdLines: string[], meta: BookMetaInfo, imageMap: Map<string, { id: string; contentType: string; data: string }>, bookName: string) {
 		if (!meta.coverHref) return;
 		let coverData = imageMap.get(meta.coverHref);
 		if (!coverData && meta.coverHref.includes(".")) {
@@ -328,35 +340,28 @@ export default class FB2ReaderPlugin extends Plugin {
 	}
 
 	private addTableOfContents(mdLines: string[], sections: SectionData[]) {
-		mdLines.push("# СОДЕРЖАНИЕ");
+		mdLines.push("# Contents");
 		sections.forEach((sec) => {
 			const title = sec.title.trim();
 			if (title) mdLines.push(`- [[#${title}|${title}]]`);
 		});
 	}
 
-	private async addSections(
-		mdLines: string[],
-		sections: SectionData[],
-		imageMap: Map<string, { id: string; contentType: string; data: string }>,
-		bookName: string
-	) {
+	private async addSections(mdLines: string[], sections: SectionData[], imageMap: Map<string, { id: string; contentType: string; data: string }>, bookName: string) {
 		for (const sec of sections) {
 			const headingLevel = Math.min(sec.level + 1, 6);
 			const title = sec.title.trim();
 			mdLines.push(title ? `\n${"#".repeat(headingLevel)} ${title}` : "\n");
-
-			// Эпиграфы
+			// Epigraphs
 			for (const epigraphEl of sec.epigraphs) {
 				const paragraphs = Array.from(epigraphEl.querySelectorAll("p"));
-				mdLines.push(">"); // начало цитаты
+				mdLines.push(">");
 				paragraphs.forEach((p) => {
 					mdLines.push(`> ${this.processFB2Paragraph(p)}`);
 				});
-				mdLines.push(">"); // разделитель
+				mdLines.push(">");
 			}
-
-			// Параграфы и изображения
+			// Paragraphs and images
 			for (const node of sec.paragraphs) {
 				const tag = node.tagName.toLowerCase();
 				if (tag === "image") {
@@ -375,29 +380,19 @@ export default class FB2ReaderPlugin extends Plugin {
 		}
 	}
 
-	/* ============================== */
-	/* ========= Вспомогательное ==== */
-	/* ============================== */
-
-	private async saveImageToVault(
-		bookName: string,
-		image: { id: string; contentType: string; data: string }
-	): Promise<string> {
+	private async saveImageToVault(bookName: string, image: { id: string; contentType: string; data: string }): Promise<string> {
 		const folderPath = `${this.settings.imageFolderPath}/${bookName}`;
 		await this.ensureFolderExists(folderPath);
-
 		const extension = image.contentType.split("/")[1] ?? "jpg";
 		let baseFileName = image.id.replace(/[^\w\d-_]/g, "_") || "image";
 		let fileName = `${baseFileName}.${extension}`;
 		let filePath = `${folderPath}/${fileName}`;
-
 		let counter = 1;
 		while (this.app.vault.getAbstractFileByPath(filePath)) {
 			fileName = `${baseFileName}_${counter}.${extension}`;
 			filePath = `${folderPath}/${fileName}`;
 			counter++;
 		}
-
 		const binaryData = this.base64ToUint8Array(image.data.trim());
 		await this.app.vault.createBinary(filePath, binaryData);
 		return filePath;
@@ -470,10 +465,26 @@ export default class FB2ReaderPlugin extends Plugin {
 		return md.trim();
 	}
 
+	private getFormattedMDFileName(meta: BookMetaInfo, fallbackName: string): string {
+		let baseName = fallbackName;
+		if (meta.title || meta.authors.length > 0) {
+			let authorsPart = "";
+			if (meta.authors.length === 1) {
+				authorsPart = meta.authors[0];
+			} else if (meta.authors.length >= 2) {
+				authorsPart = meta.authors.slice(0, 2).join(", ");
+				if (meta.authors.length > 2) {
+					authorsPart += " et al.";
+				}
+			}
+			baseName = authorsPart ? `${authorsPart} – ${meta.title}` : meta.title;
+		}
+		return baseName.replace(/[\\\/:*?"<>|]/g, "");
+	}
+
 	private async getAvailableMdPath(baseName: string): Promise<string> {
 		const folder = this.settings.outputFolderPath.trim();
 		if (folder) await this.ensureFolderExists(folder);
-
 		let newMdPath = folder ? `${folder}/${baseName}.md` : `${baseName}.md`;
 		let counter = 1;
 		while (this.app.vault.getAbstractFileByPath(newMdPath)) {
@@ -482,10 +493,6 @@ export default class FB2ReaderPlugin extends Plugin {
 		}
 		return newMdPath;
 	}
-
-	/* ============================== */
-	/* ========= Загрузка и Сохранение данных ===== */
-	/* ============================== */
 
 	async loadSettings() {
 		const data: PluginData | null = await this.loadData();
@@ -506,35 +513,149 @@ export default class FB2ReaderPlugin extends Plugin {
 			lastReadPositions: this.lastReadPositions,
 		});
 	}
+
+	/* ============================== */
+	/* ===== Quote Handling ===== */
+	/* ============================== */
+
+	private async handleSaveQuote(view: MarkdownView) {
+		const editor = view.editor;
+		let selectedText = editor.getSelection().trim();
+		if (!selectedText) {
+			new Notice("No text selected!");
+			return;
+		}
+		const bookFile = view.file;
+		if (!bookFile) {
+			new Notice("Could not determine current file.");
+			return;
+		}
+		const blockId = this.generateBlockId();
+		const blockIdRegex = /\n\^\w{8,}/;
+		if (!blockIdRegex.test(selectedText)) {
+			editor.replaceSelection(selectedText + `\n^${blockId}`);
+			selectedText += `\n^${blockId}`;
+		}
+		const quotesFileName = `${bookFile.basename}-quotes.md`;
+		const quotesFolder = this.settings.quotesFolderPath.trim();
+		const quotesFilePath = quotesFolder ? `${quotesFolder}/${quotesFileName}` : quotesFileName;
+		const formattedQuote = selectedText
+			.split("\n")
+			.map((line) => line.startsWith("^") ? line : `> ${line.trim()}`)
+			.join("\n");
+		const now = new Date();
+		const timeStamp = now.toLocaleString();
+		const linkText = this.app.metadataCache.fileToLinktext(bookFile, "");
+		const sourceLink = `[[${linkText}#^${blockId}]]`;
+		const quoteEntry = `\n\n### Quote from ${timeStamp}\n\n${formattedQuote}\n\n_Source: ${sourceLink}_\n`;
+		let existingContent = "";
+		const existingFile = this.app.vault.getAbstractFileByPath(quotesFilePath);
+		if (existingFile) {
+			try {
+				existingContent = await this.app.vault.read(existingFile as TFile);
+			} catch (error) {
+				console.error("Error reading quote file:", error);
+			}
+		} else {
+			existingContent =
+				`# Quotes for: ${bookFile.basename}\n` +
+				`_File created ${timeStamp}_\n\n---\n`;
+		}
+		const newContent = existingContent + quoteEntry;
+		try {
+			if (existingFile) {
+				await this.app.vault.modify(existingFile as TFile, newContent);
+			} else {
+				if (quotesFolder) {
+					await this.ensureFolderExists(quotesFolder);
+				}
+				await this.app.vault.create(quotesFilePath, newContent);
+			}
+			new Notice(`Quote saved to ${quotesFilePath}`);
+		} catch (error) {
+			new Notice("Error saving quote");
+			console.error("Error while saving quote:", error);
+		}
+	}
+
+	private generateBlockId(): string {
+		return Math.random().toString(36).substr(2, 8);
+	}
 }
 
 /* ============================== */
-/* ========= UI-Модали ========= */
+/* ======= UI Modals ====== */
 /* ============================== */
 
-class ChooseFB2FileModal extends Modal {
-	private onChoose: (file: TFile) => void;
+class FB2FileSuggestModal extends SuggestModal<TFile> {
+	plugin: FB2ReaderPlugin;
 
-	constructor(app: App, onChoose: (file: TFile) => void) {
+	constructor(app: App, plugin: FB2ReaderPlugin) {
 		super(app);
-		this.onChoose = onChoose;
+		this.plugin = plugin;
+	}
+
+	getSuggestions(query: string): TFile[] {
+		let fb2Files = this.app.vault.getAllLoadedFiles().filter(
+			(file): file is TFile => file instanceof TFile && file.extension === "fb2"
+		);
+		if (this.plugin.settings.fb2BaseFolderPath) {
+			fb2Files = fb2Files.filter((file) =>
+				file.path.startsWith(this.plugin.settings.fb2BaseFolderPath)
+			);
+		}
+		if (!query) return fb2Files;
+		return fb2Files.filter((file) =>
+			file.path.toLowerCase().includes(query.toLowerCase())
+		);
+	}
+
+	renderSuggestion(file: TFile, el: HTMLElement) {
+		el.createEl("div", { text: file.path });
+	}
+
+	onChooseSuggestion(file: TFile) {
+		this.plugin.convertFB2(file);
+	}
+}
+
+class FolderSelectModal extends Modal {
+	onSelect: (folderPath: string) => void;
+	constructor(app: App, onSelect: (folderPath: string) => void) {
+		super(app);
+		this.onSelect = onSelect;
+	}
+
+	// Recursively retrieve all folders from the Vault
+	getAllFolders(folder?: TFolder, indent: string = ""): { folder: TFolder; display: string }[] {
+		const results: { folder: TFolder; display: string }[] = [];
+		if (!folder) {
+			folder = this.app.vault.getRoot();
+		}
+		for (const child of folder.children) {
+			if (child instanceof TFolder) {
+				results.push({ folder: child, display: indent + child.name });
+				results.push(...this.getAllFolders(child, indent + "  "));
+			}
+		}
+		return results;
 	}
 
 	onOpen() {
 		const { contentEl } = this;
-		contentEl.createEl("h2", { text: "Select FB2 file to convert" });
-		const fb2Files = this.app.vault.getFiles().filter((f) => f.extension === "fb2");
-
-		if (fb2Files.length === 0) {
-			contentEl.createEl("p", { text: "No .fb2 files found in the Vault." });
+		contentEl.createEl("h2", { text: "Select Folder" });
+		const folders = this.getAllFolders();
+		if (folders.length === 0) {
+			contentEl.createEl("p", { text: "No folders available." });
 			return;
 		}
-
-		fb2Files.forEach((file) => {
-			const btn = contentEl.createEl("button", { text: file.name });
+		folders.forEach((item) => {
+			const btn = contentEl.createEl("button", { text: item.display });
+			btn.style.display = "block";
+			btn.style.margin = "5px 0";
 			btn.addEventListener("click", () => {
 				this.close();
-				this.onChoose(file);
+				this.onSelect(item.folder.path);
 			});
 		});
 	}
@@ -544,26 +665,56 @@ class ChooseFB2FileModal extends Modal {
 	}
 }
 
+/**
+ * Modal for entering a custom font family.
+ */
+class CustomFontModal extends Modal {
+	onChoose: (fontFamily: string) => void;
+	constructor(app: App, onChoose: (fontFamily: string) => void) {
+		super(app);
+		this.onChoose = onChoose;
+	}
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.createEl("h2", { text: "Enter Custom Font Family" });
+		const input = contentEl.createEl("input", { type: "text", placeholder: "e.g., 'Comic Sans MS'" });
+		input.style.width = "100%";
+		input.style.marginBottom = "10px";
+		const submitBtn = contentEl.createEl("button", { text: "Submit" });
+		submitBtn.style.display = "block";
+		submitBtn.addEventListener("click", () => {
+			const val = input.value.trim();
+			if (val) {
+				this.onChoose(val);
+				this.close();
+			} else {
+				new Notice("Please enter a font family name.");
+			}
+		});
+	}
+	onClose() {
+		this.contentEl.empty();
+	}
+}
+
 /* ============================== */
-/* ==== Настройки Плагина ======= */
+/* ===== Plugin Settings Tab ===== */
 /* ============================== */
 
 class FB2ReaderSettingTab extends PluginSettingTab {
 	plugin: FB2ReaderPlugin;
-
 	constructor(app: App, plugin: FB2ReaderPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
-
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
-		containerEl.createEl("h2", { text: "FB2 Converter Settings" });
+		containerEl.createEl("h3", { text: "FB2 Converter & Quotes Settings" });
 
 		new Setting(containerEl)
 			.setName("Image Folder Path")
-			.setDesc("Specify the folder path for saving images from .fb2 files. Example: books/imgs")
+			.setDesc("Specify the folder for storing images from FB2 files. Example: books/imgs")
 			.addText((text) =>
 				text
 					.setPlaceholder("fb2-images")
@@ -576,7 +727,7 @@ class FB2ReaderSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Output Folder Path")
-			.setDesc("Specify the folder where the converted .md files will be stored. Example: books/output")
+			.setDesc("Specify the folder where converted .md files will be stored. Example: books/output")
 			.addText((text) =>
 				text
 					.setPlaceholder("output")
@@ -586,5 +737,168 @@ class FB2ReaderSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
+
+		new Setting(containerEl)
+			.setName("Quotes Folder Path")
+			.setDesc("Specify the folder where quote files will be saved. Example: quotes")
+			.addText((text) =>
+				text
+					.setPlaceholder("quotes")
+					.setValue(this.plugin.settings.quotesFolderPath)
+					.onChange(async (value) => {
+						this.plugin.settings.quotesFolderPath = value.trim() || "quotes";
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("FB2 Base Folder Path")
+			.setDesc("Specify the base folder (relative to the Vault root) for FB2 file search. Leave empty to search the entire Vault.")
+			.addText((text) =>
+				text
+					.setPlaceholder("e.g., books/fb2")
+					.setValue(this.plugin.settings.fb2BaseFolderPath)
+					.onChange(async (value) => {
+						this.plugin.settings.fb2BaseFolderPath = value.trim();
+						await this.plugin.saveSettings();
+					})
+			)
+			.addButton((btn) => {
+				btn.setButtonText("Select Folder");
+				btn.onClick(() => {
+					new FolderSelectModal(this.app, (folderPath: string) => {
+						this.plugin.settings.fb2BaseFolderPath = folderPath;
+						this.plugin.saveSettings();
+						this.display(); // re-render settings tab to update value
+					}).open();
+				});
+			});
+
+		containerEl.createEl("h3", { text: "Custom Reading Styles" });
+		const sampleEl = containerEl.createEl("div", {
+			text:
+				"Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.",
+		});
+		sampleEl.style.cssText =
+			"padding: 10px; border: 1px solid var(--background-modifier-border); margin-bottom: 10px;" +
+			`font-size: ${this.plugin.settings.readingFontSize}; ` +
+			`color: ${this.plugin.settings.readingFontColor}; ` +
+			`background: ${this.plugin.settings.readingBackgroundColor}; ` +
+			`line-height: ${this.plugin.settings.readingLineHeight}; ` +
+			`font-family: ${this.plugin.settings.readingFontFamily}; ` +
+			`text-align: ${this.plugin.settings.readingTextAlign};`;
+
+		new Setting(containerEl)
+			.setName("Reading Font Size")
+			.setDesc("Select font size (10 to 36 px)")
+			.addText((text) => {
+				text.inputEl.type = "range";
+				text.inputEl.min = "10";
+				text.inputEl.max = "36";
+				text.inputEl.step = "1";
+				const currentSize = parseInt(this.plugin.settings.readingFontSize, 10) || 16;
+				text.setValue(currentSize.toString());
+				text.inputEl.addEventListener("input", (e) => {
+					const val = (e.target as HTMLInputElement).value;
+					sampleEl.style.fontSize = val + "px";
+					this.plugin.settings.readingFontSize = val + "px";
+					this.plugin.updateReadingModeStyle();
+				});
+				text.onChange(async (value) => {
+					this.plugin.settings.readingFontSize = value + "px";
+					await this.plugin.saveSettings();
+					this.plugin.updateReadingModeStyle();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName("Reading Font Color")
+			.setDesc("Select font color")
+			.addText((text) => {
+				text.inputEl.type = "color";
+				text.setValue(this.plugin.settings.readingFontColor);
+				text.onChange(async (value) => {
+					this.plugin.settings.readingFontColor = value.trim() || "#333";
+					await this.plugin.saveSettings();
+					this.plugin.updateReadingModeStyle();
+					sampleEl.style.color = this.plugin.settings.readingFontColor;
+				});
+			});
+
+		new Setting(containerEl)
+			.setName("Reading Background Color")
+			.setDesc("Select background color")
+			.addText((text) => {
+				text.inputEl.type = "color";
+				text.setValue(this.plugin.settings.readingBackgroundColor);
+				text.onChange(async (value) => {
+					this.plugin.settings.readingBackgroundColor = value.trim() || "#f5f5f5";
+					await this.plugin.saveSettings();
+					this.plugin.updateReadingModeStyle();
+					sampleEl.style.background = this.plugin.settings.readingBackgroundColor;
+				});
+			});
+
+		new Setting(containerEl)
+			.setName("Reading Line Height")
+			.setDesc("Enter line height (e.g., 1.5)")
+			.addText((text) => {
+				text.setValue(this.plugin.settings.readingLineHeight);
+				text.onChange(async (value) => {
+					this.plugin.settings.readingLineHeight = value.trim() || "1.5";
+					await this.plugin.saveSettings();
+					this.plugin.updateReadingModeStyle();
+					sampleEl.style.lineHeight = this.plugin.settings.readingLineHeight;
+				});
+			});
+
+		new Setting(containerEl)
+			.setName("Reading Font Family")
+			.setDesc("Select a font family or choose custom")
+			.addDropdown((dropdown) => {
+				// Predefined fonts and an option for custom
+				const predefinedFonts = ["sans-serif", "serif", "monospace", "Arial", "Verdana", "Times New Roman", "Custom..."];
+				predefinedFonts.forEach((font) => dropdown.addOption(font, font));
+				// If current value is not in the predefined list, set it as custom.
+				if (!predefinedFonts.includes(this.plugin.settings.readingFontFamily)) {
+					dropdown.setValue("Custom...");
+				} else {
+					dropdown.setValue(this.plugin.settings.readingFontFamily);
+				}
+				dropdown.onChange(async (value) => {
+					if (value === "Custom...") {
+						new CustomFontModal(this.app, (customFont: string) => {
+							this.plugin.settings.readingFontFamily = customFont;
+							this.plugin.saveSettings();
+							this.plugin.updateReadingModeStyle();
+							sampleEl.style.fontFamily = customFont;
+							// Update dropdown to display custom value for future sessions.
+							dropdown.setValue(customFont);
+						}).open();
+					} else {
+						this.plugin.settings.readingFontFamily = value;
+						await this.plugin.saveSettings();
+						this.plugin.updateReadingModeStyle();
+						sampleEl.style.fontFamily = value;
+					}
+				});
+			});
+
+		new Setting(containerEl)
+			.setName("Reading Text Align")
+			.setDesc("Select text alignment")
+			.addDropdown((dropdown) => {
+				dropdown.addOption("left", "Left");
+				dropdown.addOption("center", "Center");
+				dropdown.addOption("right", "Right");
+				dropdown.addOption("justify", "Justify");
+				dropdown.setValue(this.plugin.settings.readingTextAlign);
+				dropdown.onChange(async (value) => {
+					this.plugin.settings.readingTextAlign = value;
+					await this.plugin.saveSettings();
+					this.plugin.updateReadingModeStyle();
+					sampleEl.style.textAlign = value;
+				});
+			});
 	}
 }
