@@ -1,7 +1,7 @@
 {
 	"id": "BooksBuddy",
 	"name": "BooksBuddy",
-	"version": "0.1.0",
+	"version": "1.0.0",
 	"minAppVersion": "1.0.0",
 	"description": "Convert and read .fb2 books directly in Obsidian.",
 	"author": "Roman Novikov",
