@@ -1,10 +1,10 @@
 {
-	"id": "fb2-reader",
-	"name": "FB2 Reader",
-	"version": "0.2.0",
+	"id": "fb2Convert ",
+	"name": "FB2 Converter",
+	"version": "0.1.0",
 	"minAppVersion": "1.0.0",
-	"description": "Read FB2 books and display images directly in Obsidian.",
-	"author": "Your Name",
+	"description": "Read FB2 books directly in Obsidian.",
+	"author": "Roman Novikov",
 	"authorUrl": "https://github.com/evergreen-96",
 	"isDesktopOnly": true
   }
