@@ -28,10 +28,6 @@ interface FB2ReaderPluginSettings {
 	readingTextAlign: string;        // e.g., "left"
 }
 
-interface LastReadPositions {
-	[filePath: string]: number;
-}
-
 const DEFAULT_SETTINGS: FB2ReaderPluginSettings = {
 	imageFolderPath: "fb2-images",
 	outputFolderPath: "",
@@ -65,7 +61,7 @@ interface PluginData {
 	imageFolderPath: string;
 	outputFolderPath: string;
 	quotesFolderPath: string;
-	lastReadPositions: LastReadPositions;
+	// Removed lastReadPositions from stored data.
 }
 
 /* ============================== */
@@ -75,7 +71,7 @@ interface PluginData {
 export default class FB2ReaderPlugin extends Plugin {
 	settings!: FB2ReaderPluginSettings;
 	private footnotes: FootnotesMap = new Map();
-	private lastReadPositions: LastReadPositions = {};
+	// Removed lastReadPositions property.
 	private isReadingMode: boolean = false;
 	public readingStyleEl!: HTMLStyleElement;
 
@@ -83,16 +79,9 @@ export default class FB2ReaderPlugin extends Plugin {
 		await this.loadSettings();
 		this.setupReadingModeStyle();
 
-		this.registerEvent(
-			this.app.workspace.on("active-leaf-change", (leaf) => {
-				try {
-					this.handleActiveLeafChange(leaf);
-				} catch (error) {
-					console.error("Error in active-leaf-change handler:", error);
-				}
-			})
-		);
+		// Removed automatic saving/restoring scroll functionality
 
+		// Command: Choose FB2 file using SuggestModal.
 		this.addCommand({
 			id: "choose-fb2-file",
 			name: "Convert FB2 to MD (choose file)",
@@ -101,6 +90,7 @@ export default class FB2ReaderPlugin extends Plugin {
 			},
 		});
 
+		// Command: Save Selected Text as Quote.
 		this.addCommand({
 			id: "save-selected-text-as-quote",
 			name: "Save Selected Text as Quote",
@@ -116,6 +106,7 @@ export default class FB2ReaderPlugin extends Plugin {
 			},
 		});
 
+		// Command: Toggle Reading Mode.
 		this.addCommand({
 			id: "toggle-reading-mode",
 			name: "Toggle Reading Mode",
@@ -129,6 +120,9 @@ export default class FB2ReaderPlugin extends Plugin {
 		this.addSettingTab(new FB2ReaderSettingTab(this.app, this));
 	}
 
+	/**
+	 * Initializes the reading mode style element.
+	 */
 	private setupReadingModeStyle() {
 		const existing = document.getElementById("reading-mode-style");
 		if (existing) {
@@ -141,6 +135,9 @@ export default class FB2ReaderPlugin extends Plugin {
 		document.head.appendChild(this.readingStyleEl);
 	}
 
+	/**
+	 * Updates the CSS rules for reading mode according to current settings.
+	 */
 	public updateReadingModeStyle() {
 		this.readingStyleEl.innerText = `
 			.markdown-preview-view.markdown-rendered.reading-mode {
@@ -157,42 +154,14 @@ export default class FB2ReaderPlugin extends Plugin {
 		`;
 	}
 
+	/**
+	 * Toggles reading mode by adding/removing the "reading-mode" class.
+	 */
 	private toggleReadingMode() {
 		this.isReadingMode = !this.isReadingMode;
-		(document.querySelectorAll(".markdown-preview-view.markdown-rendered") as NodeListOf<HTMLElement>).forEach((el) => {
-			el.classList.toggle("reading-mode", this.isReadingMode);
-		});
+		(document.querySelectorAll(".markdown-preview-view.markdown-rendered") as NodeListOf<HTMLElement>)
+			.forEach((el) => el.classList.toggle("reading-mode", this.isReadingMode));
 		new Notice(`Reading Mode ${this.isReadingMode ? "Activated" : "Deactivated"}`);
-	}
-
-	private handleActiveLeafChange(leaf: any) {
-		if (!leaf) return;
-		const view = leaf.view;
-		if (view instanceof MarkdownView && view.contentEl) {
-			const file = view.file;
-			if (!file) return;
-			const savedScroll = this.lastReadPositions[file.path];
-			if (savedScroll !== undefined) {
-				window.setTimeout(() => {
-					try {
-						view.contentEl.scrollTop = savedScroll;
-					} catch (e) {
-						console.error("Error setting scrollTop:", e);
-					}
-				}, 100);
-			}
-			if (!view.contentEl.getAttribute("data-scroll-listener")) {
-				view.contentEl.setAttribute("data-scroll-listener", "true");
-				view.contentEl.addEventListener("scroll", () => {
-					try {
-						this.lastReadPositions[file.path] = view.contentEl.scrollTop;
-						this.savePluginData();
-					} catch (e) {
-						console.error("Error in scroll event handler:", e);
-					}
-				});
-			}
-		}
 	}
 
 	async convertFB2(file: TFile) {
@@ -212,6 +181,7 @@ export default class FB2ReaderPlugin extends Plugin {
 			new Notice(`Error parsing FB2: ${error}`);
 			return;
 		}
+
 		const meta = this.parseMetaInfo(doc);
 		this.footnotes = this.parseFootnotes(doc);
 		const imageMap = this.extractImages(doc);
@@ -225,9 +195,7 @@ export default class FB2ReaderPlugin extends Plugin {
 		const allRootSections: SectionData[] = [];
 		for (const bodyEl of mainBodies) {
 			const topSections = Array.from(bodyEl.querySelectorAll(":scope > section"));
-			topSections.forEach((sec) => {
-				allRootSections.push(this.parseSectionRecursive(sec, 1));
-			});
+			topSections.forEach((sec) => allRootSections.push(this.parseSectionRecursive(sec, 1)));
 		}
 		const flatSections: SectionData[] = [];
 		this.flattenSections(allRootSections, flatSections);
@@ -352,7 +320,6 @@ export default class FB2ReaderPlugin extends Plugin {
 			const headingLevel = Math.min(sec.level + 1, 6);
 			const title = sec.title.trim();
 			mdLines.push(title ? `\n${"#".repeat(headingLevel)} ${title}` : "\n");
-			// Epigraphs
 			for (const epigraphEl of sec.epigraphs) {
 				const paragraphs = Array.from(epigraphEl.querySelectorAll("p"));
 				mdLines.push(">");
@@ -361,7 +328,6 @@ export default class FB2ReaderPlugin extends Plugin {
 				});
 				mdLines.push(">");
 			}
-			// Paragraphs and images
 			for (const node of sec.paragraphs) {
 				const tag = node.tagName.toLowerCase();
 				if (tag === "image") {
@@ -497,20 +463,17 @@ export default class FB2ReaderPlugin extends Plugin {
 	async loadSettings() {
 		const data: PluginData | null = await this.loadData();
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
-		this.lastReadPositions = data?.lastReadPositions ?? {};
 	}
 
 	async saveSettings() {
 		await this.saveData({
-			...this.settings,
-			lastReadPositions: this.lastReadPositions,
+			...this.settings
 		});
 	}
 
 	private async savePluginData() {
 		await this.saveData({
-			...this.settings,
-			lastReadPositions: this.lastReadPositions,
+			...this.settings
 		});
 	}
 
@@ -530,7 +493,7 @@ export default class FB2ReaderPlugin extends Plugin {
 			new Notice("Could not determine current file.");
 			return;
 		}
-		const blockId = this.generateBlockId();
+		const blockId = Math.random().toString(36).substr(2, 8);
 		const blockIdRegex = /\n\^\w{8,}/;
 		if (!blockIdRegex.test(selectedText)) {
 			editor.replaceSelection(selectedText + `\n^${blockId}`);
@@ -577,10 +540,6 @@ export default class FB2ReaderPlugin extends Plugin {
 			console.error("Error while saving quote:", error);
 		}
 	}
-
-	private generateBlockId(): string {
-		return Math.random().toString(36).substr(2, 8);
-	}
 }
 
 /* ============================== */
@@ -589,12 +548,10 @@ export default class FB2ReaderPlugin extends Plugin {
 
 class FB2FileSuggestModal extends SuggestModal<TFile> {
 	plugin: FB2ReaderPlugin;
-
 	constructor(app: App, plugin: FB2ReaderPlugin) {
 		super(app);
 		this.plugin = plugin;
 	}
-
 	getSuggestions(query: string): TFile[] {
 		let fb2Files = this.app.vault.getAllLoadedFiles().filter(
 			(file): file is TFile => file instanceof TFile && file.extension === "fb2"
@@ -609,11 +566,9 @@ class FB2FileSuggestModal extends SuggestModal<TFile> {
 			file.path.toLowerCase().includes(query.toLowerCase())
 		);
 	}
-
 	renderSuggestion(file: TFile, el: HTMLElement) {
 		el.createEl("div", { text: file.path });
 	}
-
 	onChooseSuggestion(file: TFile) {
 		this.plugin.convertFB2(file);
 	}
@@ -625,8 +580,6 @@ class FolderSelectModal extends Modal {
 		super(app);
 		this.onSelect = onSelect;
 	}
-
-	// Recursively retrieve all folders from the Vault
 	getAllFolders(folder?: TFolder, indent: string = ""): { folder: TFolder; display: string }[] {
 		const results: { folder: TFolder; display: string }[] = [];
 		if (!folder) {
@@ -640,7 +593,6 @@ class FolderSelectModal extends Modal {
 		}
 		return results;
 	}
-
 	onOpen() {
 		const { contentEl } = this;
 		contentEl.createEl("h2", { text: "Select Folder" });
@@ -659,7 +611,6 @@ class FolderSelectModal extends Modal {
 			});
 		});
 	}
-
 	onClose() {
 		this.contentEl.empty();
 	}
@@ -856,10 +807,9 @@ class FB2ReaderSettingTab extends PluginSettingTab {
 			.setName("Reading Font Family")
 			.setDesc("Select a font family or choose custom")
 			.addDropdown((dropdown) => {
-				// Predefined fonts and an option for custom
 				const predefinedFonts = ["sans-serif", "serif", "monospace", "Arial", "Verdana", "Times New Roman", "Custom..."];
 				predefinedFonts.forEach((font) => dropdown.addOption(font, font));
-				// If current value is not in the predefined list, set it as custom.
+				// If current value is not in the predefined list, treat it as custom.
 				if (!predefinedFonts.includes(this.plugin.settings.readingFontFamily)) {
 					dropdown.setValue("Custom...");
 				} else {
@@ -872,7 +822,6 @@ class FB2ReaderSettingTab extends PluginSettingTab {
 							this.plugin.saveSettings();
 							this.plugin.updateReadingModeStyle();
 							sampleEl.style.fontFamily = customFont;
-							// Update dropdown to display custom value for future sessions.
 							dropdown.setValue(customFont);
 						}).open();
 					} else {
