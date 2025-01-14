@@ -1,10 +1,10 @@
-# FB2 Reader Plugin for Obsidian
+# FB2 Reader Plugin
 
-The FB2 Reader Plugin brings powerful features to your Obsidian workspace, making it effortless to manage and work with FB2 files. From seamless file conversion to customizable reading modes, this plugin is designed for users who want their notes to be as efficient and enjoyable as possible.
+The FB2 Reader Plugin brings powerful features to your workspace, making it effortless to manage and work with FB2 files. From seamless file conversion to customizable reading modes, this plugin is designed for users who want their notes to be as efficient and enjoyable as possible.
 
 ## Features
 
-- 📄 **FB2 to Markdown Conversion:** Quickly transform FB2 files into clean Markdown files, ready for editing and organizing in Obsidian.
+- 📄 **FB2 to Markdown Conversion:** Quickly transform FB2 files into clean Markdown files, ready for editing and organizing.
 - ✏️ **Quote Management:** Highlight text and save it as quotes, complete with references to the original source.
 - 🎨 **Customizable Reading Styles:** Personalize how your Markdown previews look with adjustable fonts, colors, and alignments.
 - 🔄 **Reading Mode Toggle:** Switch on your custom reading styles with a simple command, enhancing your reading experience.
@@ -40,6 +40,6 @@ Follow these steps to activate Reading Mode and apply your custom styles to Mark
 
 1. Open the Command Palette (`Ctrl+P` or `Cmd+P` on Mac).
 2. Search for `Toggle Reading Mode` and select it.
-3. Your Markdown preview pane will now display your customized reading styles.
+3. Enable read mode.
+4. Your Markdown preview pane will now display your customized reading styles.
 
-Enjoy a seamless and enhanced experience with the FB2 Reader Plugin in Obsidian!
