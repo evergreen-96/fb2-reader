@@ -1,9 +1,9 @@
 {
-	"id": "fb2Convert ",
-	"name": "FB2 Converter",
+	"id": "BooksBuddy",
+	"name": "BooksBuddy",
 	"version": "0.1.0",
 	"minAppVersion": "1.0.0",
-	"description": "Read FB2 books directly in Obsidian.",
+	"description": "Convert and read .fb2 books directly in Obsidian.",
 	"author": "Roman Novikov",
 	"authorUrl": "https://github.com/evergreen-96",
 	"isDesktopOnly": true

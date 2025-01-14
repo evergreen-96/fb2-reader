@@ -1,94 +1,45 @@
-# Obsidian Sample Plugin
+# FB2 Reader Plugin for Obsidian
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+The FB2 Reader Plugin brings powerful features to your Obsidian workspace, making it effortless to manage and work with FB2 files. From seamless file conversion to customizable reading modes, this plugin is designed for users who want their notes to be as efficient and enjoyable as possible.
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+## Features
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open Sample Modal" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+- 📄 **FB2 to Markdown Conversion:** Quickly transform FB2 files into clean Markdown files, ready for editing and organizing in Obsidian.
+- ✏️ **Quote Management:** Highlight text and save it as quotes, complete with references to the original source.
+- 🎨 **Customizable Reading Styles:** Personalize how your Markdown previews look with adjustable fonts, colors, and alignments.
+- 🔄 **Reading Mode Toggle:** Switch on your custom reading styles with a simple command, enhancing your reading experience.
 
-## First time developing plugins?
+## Recommended Plugins
 
-Quick starting guide for new plugin devs:
+Enhance your workflow by pairing this plugin with:
 
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
-- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
+- 🖱️ [cMenu](https://github.com/roovo/cMenu): Assign commands like "Save Selected Text as Quote" to context menu options for quicker access.
+- 🎯 [Remember Cursor Position](https://github.com/dy-sh/obsidian-remember-cursor-position): Ensure you always return to the exact spot you left off in any file, eliminating unnecessary scrolling.
 
-## Releasing new releases
+## Plugin Settings
 
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
-- Publish the release.
+### General Settings
 
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
+- 📂 **Image Folder Path:** Specify where images extracted from FB2 files should be stored.
+- 📂 **Output Folder Path:** Choose the directory for saving converted Markdown files.
+- 📂 **Quotes Folder Path:** Define a folder to keep your saved quotes organized.
+- 📂 **FB2 Base Folder Path:** Restrict the plugin to search for FB2 files in a specific folder, or leave it empty for a global search.
 
-## Adding your plugin to the community plugin list
+### Reading Mode Customization
 
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
+- 🔠 **Font Size:** Adjust the font size for previews, ranging from 10px to 36px.
+- 🎨 **Font Color:** Use the color picker to select your preferred text color.
+- 🖌️ **Background Color:** Customize the background color for a more comfortable reading experience.
+- 📏 **Line Height:** Set the spacing between lines (default: `1.5`).
+- 🖋️ **Font Family:** Choose from popular fonts or enter a custom font family.
+- ↔️ **Text Alignment:** Select text alignment—left, center, right, or justified.
 
-## How to use
+## Activating Reading Mode
 
-- Clone this repo.
-- Make sure your NodeJS is at least v16 (`node --version`).
-- `npm i` or `yarn` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
+Follow these steps to activate Reading Mode and apply your custom styles to Markdown previews:
 
-## Manually installing the plugin
+1. Open the Command Palette (`Ctrl+P` or `Cmd+P` on Mac).
+2. Search for `Toggle Reading Mode` and select it.
+3. Your Markdown preview pane will now display your customized reading styles.
 
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
-
-## Improve code quality with eslint (optional)
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code. 
-- To use eslint with this project, make sure to install eslint from terminal:
-  - `npm install -g eslint`
-- To use eslint to analyze this project use this command:
-  - `eslint main.ts`
-  - eslint will then create a report with suggestions for code improvement by file and line number.
-- If your source code is in a folder, such as `src`, you can use eslint with this command to analyze all files in that folder:
-  - `eslint .\src\`
-
-## Funding URL
-
-You can include funding URLs where people who use your plugin can financially support it.
-
-The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
-
-```json
-{
-    "fundingUrl": "https://buymeacoffee.com"
-}
-```
-
-If you have multiple URLs, you can also do:
-
-```json
-{
-    "fundingUrl": {
-        "Buy Me a Coffee": "https://buymeacoffee.com",
-        "GitHub Sponsor": "https://github.com/sponsors",
-        "Patreon": "https://www.patreon.com/"
-    }
-}
-```
-
-## API Documentation
-
-See https://github.com/obsidianmd/obsidian-api
+Enjoy a seamless and enhanced experience with the FB2 Reader Plugin in Obsidian!
